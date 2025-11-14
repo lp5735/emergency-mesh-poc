@@ -122,12 +122,162 @@ void EmergencyWiFiService::setupWebServer() {
         }
     });
 
-    // Root path - just show instructions
+    // Root path - serve interactive web UI
     httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        Serial.println("Root path requested");
-        String html = "<h1>Emergency Mesh</h1>";
-        html += "<p>Send message: <a href='/send?msg=hello'>/send?msg=hello</a></p>";
-        html += "<p>Quick test: <a href='/test'>/test</a></p>";
+        Serial.println("Root path requested - serving web UI");
+        const char* html = R"(<!DOCTYPE html>
+<html>
+<head>
+    <title>Emergency Mesh</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #1e1e1e; color: #00ff00; max-width: 600px; margin: 0 auto; }
+        h1 { color: #00ff00; border-bottom: 2px solid #00ff00; padding-bottom: 10px; }
+        #status { padding: 10px; margin: 10px 0; border-radius: 5px; font-weight: bold; }
+        #status.connected { background: #004400; color: #00ff00; }
+        #status.disconnected { background: #440000; color: #ff0000; }
+        #messages { border: 1px solid #00ff00; padding: 10px; height: 300px; overflow-y: scroll; margin: 10px 0; background: #000; border-radius: 5px; }
+        .message { margin: 5px 0; padding: 5px; }
+        .sent { color: #ffff00; }
+        .received { color: #00ff00; font-weight: bold; }
+        .error { color: #ff0000; }
+        .info { color: #00aaff; }
+        .input-group { margin: 10px 0; }
+        input { padding: 10px; width: calc(100% - 22px); background: #000; color: #00ff00; border: 1px solid #00ff00; border-radius: 5px; font-size: 16px; }
+        button { padding: 10px 20px; background: #00ff00; color: #000; border: none; cursor: pointer; margin: 5px 5px 5px 0; border-radius: 5px; font-weight: bold; }
+        button:active { background: #00aa00; }
+        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+        .stat { background: #000; padding: 10px; border: 1px solid #00ff00; border-radius: 5px; text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #00ff00; }
+        .stat-label { font-size: 12px; color: #00aa00; }
+    </style>
+</head>
+<body>
+    <h1>Emergency Mesh Network</h1>
+    <div id="status" class="disconnected">Connecting...</div>
+
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-value" id="sentCount">0</div>
+            <div class="stat-label">SENT</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="receivedCount">0</div>
+            <div class="stat-label">RECEIVED</div>
+        </div>
+    </div>
+
+    <div id="messages"></div>
+
+    <div class="input-group">
+        <input type="text" id="messageInput" placeholder="Type message and press Enter...">
+        <button onclick="sendMessage()">Send Message</button>
+    </div>
+
+    <script>
+        let ws;
+        let sentCount = 0;
+        let receivedCount = 0;
+        const messages = document.getElementById('messages');
+        const status = document.getElementById('status');
+        const input = document.getElementById('messageInput');
+
+        function log(msg, className = '') {
+            const div = document.createElement('div');
+            div.className = 'message ' + className;
+            const time = new Date().toLocaleTimeString();
+            div.textContent = time + ' - ' + msg;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function updateStatus(text, connected) {
+            status.textContent = text;
+            status.className = connected ? 'connected' : 'disconnected';
+        }
+
+        function updateStats() {
+            document.getElementById('sentCount').textContent = sentCount;
+            document.getElementById('receivedCount').textContent = receivedCount;
+        }
+
+        function connect() {
+            ws = new WebSocket('ws://' + window.location.hostname + ':81');
+
+            ws.onopen = () => {
+                updateStatus('Connected to Emergency Mesh', true);
+                log('WebSocket connected', 'info');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'message') {
+                        receivedCount++;
+                        updateStats();
+
+                        // Distinguish between WiFi and LoRa messages
+                        if (data.source === 'wifi') {
+                            log('WiFi: ' + data.text + ' (from local client)', 'received');
+                        } else {
+                            log('LoRa: ' + data.text + ' (from: ' + data.from + ', RSSI: ' + data.rssi + ' dBm)', 'received');
+                        }
+                    } else if (data.type === 'node_info') {
+                        log('Node ID: ' + data.nodeId, 'info');
+                    } else {
+                        log('Data: ' + event.data, 'info');
+                    }
+                } catch(e) {
+                    log('Received: ' + event.data, 'received');
+                }
+            };
+
+            ws.onerror = () => {
+                log('WebSocket error', 'error');
+                updateStatus('Connection error', false);
+            };
+
+            ws.onclose = () => {
+                updateStatus('Disconnected - reconnecting...', false);
+                log('WebSocket closed, reconnecting in 3s...', 'error');
+                setTimeout(connect, 3000);
+            };
+        }
+
+        function sendMessage() {
+            const msg = input.value.trim();
+            if (!msg) return;
+
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Error: Not connected to WebSocket', 'error');
+                return;
+            }
+
+            // Send via WebSocket (will broadcast to all WiFi clients + LoRa mesh)
+            const msgObj = {
+                text: msg,
+                timestamp: Date.now()
+            };
+            ws.send(JSON.stringify(msgObj));
+
+            sentCount++;
+            updateStats();
+            log('Sent: ' + msg, 'sent');
+            input.value = '';
+        }
+
+        // Send on Enter key
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Auto-connect on load
+        connect();
+        log('Emergency Mesh Web UI loaded', 'info');
+        log('Waiting for LoRa messages...', 'info');
+    </script>
+</body>
+</html>)";
         request->send(200, "text/html", html);
     });
 
@@ -191,12 +341,51 @@ void EmergencyWiFiService::handleWebSocketEvent(uint8_t num, WStype_t type, uint
 }
 
 void EmergencyWiFiService::handleClientMessage(uint8_t clientId, const char* json) {
-    // This will be forwarded to EmergencyWiFiBridge
-    // For now, just echo back for testing
     Serial.printf("Handling message from client %u: %s\n", clientId, json);
 
-    // TODO: Forward to bridge module
-    // emergencyBridge.handleWiFiMessage(json);
+    // Parse the incoming message
+    DynamicJsonDocument inDoc(512);
+    DeserializationError error = deserializeJson(inDoc, json);
+
+    if (error) {
+        Serial.printf("Failed to parse message: %s\n", error.c_str());
+        return;
+    }
+
+    // Extract message text
+    const char* msgText = inDoc["text"] | inDoc["msg"] | json;  // Try multiple formats
+
+    if (!msgText || strlen(msgText) == 0) {
+        Serial.println("Empty message, ignoring");
+        return;
+    }
+
+    Serial.printf("Message text: %s\n", msgText);
+
+    // 1. Broadcast to all WiFi clients (local chat on same AP)
+    DynamicJsonDocument outDoc(512);
+    outDoc["type"] = "message";
+    outDoc["from"] = "local";  // From another WiFi client on same AP
+    outDoc["text"] = msgText;
+    outDoc["timestamp"] = millis();
+    outDoc["rssi"] = 0;  // WiFi messages don't have RSSI
+    outDoc["snr"] = 0;   // WiFi messages don't have SNR
+    outDoc["source"] = "wifi";  // Mark as WiFi-originated
+
+    String outJson;
+    serializeJson(outDoc, outJson);
+
+    broadcastToClients(outJson.c_str());
+    Serial.printf("Broadcasted to WiFi clients: %s\n", outJson.c_str());
+
+    // 2. Forward to LoRa mesh (if bridge module exists)
+    if (emergencyWiFiBridge) {
+        if (emergencyWiFiBridge->sendTextToMesh(msgText)) {
+            Serial.println("Also sent to LoRa mesh");
+        } else {
+            Serial.println("Failed to send to LoRa mesh");
+        }
+    }
 }
 
 void EmergencyWiFiService::sendNodeInfo(uint8_t clientId) {
