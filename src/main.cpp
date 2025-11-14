@@ -150,6 +150,11 @@ extern void tftSetup(void);
 UdpMulticastHandler *udpHandler = nullptr;
 #endif
 
+#ifdef ENABLE_WIFI_AP
+#include "wifi/WiFiMeshBridge.h"
+#include "wifi/EmergencyWiFiService.h"
+#endif
+
 #if defined(TCXO_OPTIONAL)
 float tcxoVoltage = SX126X_DIO3_TCXO_VOLTAGE; // if TCXO is optional, put this here so it can be changed further down.
 #endif
@@ -1445,8 +1450,17 @@ void setup()
     osk_found = true;
 #endif
 
-#if defined(ARCH_ESP32) && !MESHTASTIC_EXCLUDE_WEBSERVER
-    // Start web server thread.
+#ifdef ENABLE_WIFI_AP
+    // Initialize Emergency WiFi AP Mode + WebServer
+    LOG_INFO("\n=== Emergency WiFi Mode ===");
+    wifiMeshBridge.init();
+    wifiService.init();
+    // This will:
+    //   1. Start WiFi AP (EMRG-NODE-XXXX) - WiFiMeshBridge
+    //   2. Start HTTP server on port 80 - EmergencyWiFiService
+    //   3. Start WebSocket server on port 81 - EmergencyWiFiService
+#elif defined(ARCH_ESP32) && !MESHTASTIC_EXCLUDE_WEBSERVER
+    // Start web server thread (standard mode).
     webServerThread = new WebServerThread();
 #endif
 
@@ -1584,6 +1598,12 @@ void loop()
 #ifdef ARCH_NRF52
     nrf52Loop();
 #endif
+
+#ifdef ENABLE_WIFI_AP
+    wifiMeshBridge.loop();
+    wifiService.loop();
+#endif
+
     power->powerCommandsCheck();
 
 #ifdef DEBUG_STACK

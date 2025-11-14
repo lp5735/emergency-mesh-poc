@@ -13,17 +13,18 @@ EmergencyWiFiService::EmergencyWiFiService()
 }
 
 void EmergencyWiFiService::init() {
-    Serial.println("Initializing Emergency WiFi Service...");
+    Serial.println("\n=== Emergency WiFi Service Initialization ===");
 
     // Initialize LittleFS for web app files
+    Serial.println("Step 1: Mounting LittleFS...");
     if (!LittleFS.begin(true)) {
         Serial.println("ERROR: LittleFS mount failed");
         return;
     }
-    Serial.println("LittleFS mounted successfully");
+    Serial.println("✓ LittleFS mounted successfully");
 
     // List files in LittleFS for debugging
-    Serial.println("Files in LittleFS:");
+    Serial.println("\nStep 2: Checking web app files...");
     File root = LittleFS.open("/");
     File file = root.openNextFile();
     while (file) {
@@ -44,17 +45,23 @@ void EmergencyWiFiService::init() {
         Serial.println("WARNING: /webapp directory not found!");
     }
 
-    // Setup WiFi AP
-    setupWiFiAP();
+    // NOTE: WiFi AP already created by WiFiMeshBridge - skip setupWiFiAP()
 
     // Setup web server
+    Serial.println("\nStep 3: Starting HTTP server (port 80)...");
     setupWebServer();
+    Serial.println("✓ HTTP server started");
 
     // Setup WebSocket
+    Serial.println("\nStep 4: Starting WebSocket server (port 81)...");
     setupWebSocket();
+    Serial.println("✓ WebSocket server started");
 
     apActive = true;
-    Serial.println("Emergency WiFi Service initialized");
+    Serial.println("\n=== Emergency WiFi Service Ready ===");
+    Serial.println("Access web UI at: http://192.168.4.1/");
+    Serial.println("WebSocket available at: ws://192.168.4.1:81");
+    Serial.println("=========================================\n");
 }
 
 void EmergencyWiFiService::setupWiFiAP() {
