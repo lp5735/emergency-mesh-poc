@@ -107,6 +107,10 @@
 #include "modules/DropzoneModule.h"
 #endif
 
+#ifdef ENABLE_WIFI_AP
+#include "modules/EmergencyWiFiBridge.h"
+#endif
+
 /**
  * Create module instances here.  If you are adding a new module, you must 'new' it here (or somewhere else)
  */
@@ -161,6 +165,9 @@ void setupModules()
 #endif
 #if !MESHTASTIC_EXCLUDE_GENERIC_THREAD_MODULE
     new GenericThreadModule();
+#endif
+#ifdef ENABLE_WIFI_AP
+    emergencyWiFiBridge = new EmergencyWiFiBridge();
 #endif
     // Note: if the rest of meshtastic doesn't need to explicitly use your module, you do not need to assign the instance
     // to a global variable.

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesh Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .box {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #00a884;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover {
+            background: #008f6e;
+        }
+        #messages {
+            min-height: 100px;
+            padding: 15px;
+            background: #e8f5e9;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        .status {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .message {
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-left: 4px solid #00a884;
+            border-radius: 3px;
+        }
+        .time {
+            color: #999;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>🌐 Mesh Network Test</h1>
+        <div class="status" id="status">Connecting...</div>
+    </div>
+
+    <div class="box">
+        <h2>Send Test Message</h2>
+        <button onclick="sendTest()">📡 Send "Hello Mesh!" to all nodes</button>
+    </div>
+
+    <div class="box">
+        <h2>Received Messages</h2>
+        <div id="messages">Waiting for messages...</div>
+    </div>
+
+    <script>
+        let ws;
+        const messagesDiv = document.getElementById('messages');
+        const statusDiv = document.getElementById('status');
+
+        // Connect to WebSocket
+        function connect() {
+            const wsUrl = `ws://${window.location.hostname}:81`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                statusDiv.innerHTML = '✅ Connected to node';
+                statusDiv.style.color = '#00a884';
+            };
+
+            ws.onmessage = (event) => {
+                const msg = document.createElement('div');
+                msg.className = 'message';
+                const time = new Date().toLocaleTimeString();
+                msg.innerHTML = `<strong>📩 Message received</strong><br>${event.data}<br><span class="time">${time}</span>`;
+                messagesDiv.appendChild(msg);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            };
+
+            ws.onerror = () => {
+                statusDiv.innerHTML = '❌ Connection error';
+                statusDiv.style.color = '#f44336';
+            };
+
+            ws.onclose = () => {
+                statusDiv.innerHTML = '⚠️ Disconnected, reconnecting...';
+                statusDiv.style.color = '#ff9800';
+                setTimeout(connect, 2000);
+            };
+        }
+
+        // Send test message via HTTP
+        async function sendTest() {
+            try {
+                const response = await fetch('/test');
+                const text = await response.text();
+                console.log('Send response:', text);
+
+                const msg = document.createElement('div');
+                msg.className = 'message';
+                msg.style.borderLeftColor = '#2196f3';
+                const time = new Date().toLocaleTimeString();
+                msg.innerHTML = `<strong>📤 Message sent</strong><br>Hello Mesh!<br><span class="time">${time}</span>`;
+                messagesDiv.appendChild(msg);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            } catch (err) {
+                alert('Error sending message: ' + err);
+            }
+        }
+
+        // Start connection
+        connect();
+    </script>
+</body>
+</html>
