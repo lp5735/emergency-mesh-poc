@@ -636,9 +636,9 @@ void TraceRouteModule::handleTraceRouteResult(const String &result)
     runState = TRACEROUTE_STATE_RESULT;
     resultShowTime = millis();
 
-    // Get the target node ID in hex format for WiFi display
+    // Get the target node ID in hex format for WiFi display (full 8-character)
     char targetHex[16];
-    snprintf(targetHex, sizeof(targetHex), "%04x", tracingNode & 0xFFFF);
+    snprintf(targetHex, sizeof(targetHex), "%08x", tracingNode);
 
     tracingNode = 0;
 

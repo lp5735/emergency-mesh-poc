@@ -5,6 +5,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include "modules/EmergencyWiFiBridge.h"
+#include "mesh/NodeDB.h"
 
 // Service Worker for PWA offline capability (~400 bytes)
 static const char SERVICE_WORKER_JS[] PROGMEM = R"JS(const CACHE='v1';
@@ -61,8 +62,8 @@ button:hover{background:#0c0}
 <button class="trace inline" onclick="traceRoute()">🔍 Trace Route</button>
 <div style="margin-bottom:10px">
 <span style="color:#f80">Node ID:</span>
-<input id="nodeId" class="trace-input" placeholder="abcd" maxlength="4" value="">
-<small style="color:#888;margin-left:10px">(4-char hex, e.g., "1234")</small>
+<input id="nodeId" class="trace-input" placeholder="1234" maxlength="4" value="">
+<small style="color:#888;margin-left:10px">(4-char hex, e.g., "a1b2")</small>
 </div>
 <div id="status">Connecting...</div>
 <div id="messages"></div>
@@ -111,7 +112,7 @@ log('🆘 EMERGENCY SOS SENT','sent');
 function traceRoute(){
 const n=document.getElementById('nodeId');
 if(!n.value||n.value.length!==4){
-alert('Please enter a 4-character hex node ID (e.g., "abcd")');
+alert('Please enter a 4-character hex node ID (e.g., "a1b2")');
 return;
 }
 if(!ws||ws.readyState!==1){
@@ -451,26 +452,50 @@ void EmergencyWiFiService::sendNodeInfo(uint8_t clientId) {
 
 void EmergencyWiFiService::handleTracerouteRequest(uint8_t clientId, JsonDocument& doc) {
     const char* targetStr = doc["target"];
+    size_t targetLen = targetStr ? strlen(targetStr) : 0;
 
-    if (!targetStr || strlen(targetStr) != 4) {
+    // Only accept 4-character hex (last 4 hex digits)
+    if (!targetStr || targetLen != 4) {
         DynamicJsonDocument errorDoc(256);
         errorDoc["type"] = "traceroute_error";
         errorDoc["error"] = "Invalid target: must be 4-character hex";
         String errorJson;
         serializeJson(errorDoc, errorJson);
         wsServer.sendTXT(clientId, errorJson);
-        Serial.printf("Traceroute error: invalid target format\n");
+        Serial.printf("Traceroute error: invalid target format (length=%d)\n", targetLen);
         return;
     }
 
-    // Convert 4-char hex string to NodeNum (0x********XXXX)
-    // Meshtastic NodeNum is typically 0x + 8 hex digits
-    // We'll use the last 4 chars from the user, padded with zeros
-    char nodeNumStr[16];
-    snprintf(nodeNumStr, sizeof(nodeNumStr), "0000%s", targetStr);
-    uint32_t nodeNum = (uint32_t)strtoul(nodeNumStr, NULL, 16);
+    // Always look up in database
+    uint16_t lastBytes = (uint16_t)strtoul(targetStr, NULL, 16);
+    Serial.printf("Traceroute request: target=%s, searching for node with last bytes 0x%04x\n", targetStr, lastBytes);
 
-    Serial.printf("Traceroute request: target=%s, nodeNum=0x%08x\n", targetStr, nodeNum);
+    // Search node database for matching node
+    uint32_t nodeNum = 0;
+    bool found = false;
+
+    for (int i = 0; i < nodeDB->getNumMeshNodes(); i++) {
+        meshtastic_NodeInfoLite *node = nodeDB->getMeshNodeByIndex(i);
+        if (node && (node->num & 0xFFFF) == lastBytes) {
+            nodeNum = node->num;
+            found = true;
+            Serial.printf("Found matching node in database: 0x%08x\n", nodeNum);
+            break;
+        }
+    }
+
+    if (!found) {
+        DynamicJsonDocument errorDoc(256);
+        errorDoc["type"] = "traceroute_error";
+        errorDoc["error"] = "Node not found in database";
+        String errorJson;
+        serializeJson(errorDoc, errorJson);
+        wsServer.sendTXT(clientId, errorJson);
+        Serial.printf("Node 0x%04x not found in database\n", lastBytes);
+        return;
+    }
+
+    Serial.printf("Traceroute target resolved to: 0x%08x\n", nodeNum);
 
     // Send acknowledgment to client
     DynamicJsonDocument ackDoc(256);
