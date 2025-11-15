@@ -58,6 +58,11 @@ pio device monitor -b 115200
 
 # Clean build (if needed)
 pio run -e heltec_v2_pwa_poc --target clean
+
+# WORKAROUND: If build fails with ".sconsign314.dblite: No such file or directory"
+# This is a known PlatformIO issue with Python 3.14 - run this once:
+python3 -c "import dbm; dbm.open('.pio/build/heltec_v2_pwa_poc/.sconsign314.dblite', 'c')"
+pio run -e heltec_v2_pwa_poc --target upload
 ```
 
 **Build Configurations**:

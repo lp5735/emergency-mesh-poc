@@ -136,12 +136,25 @@ void EmergencyWiFiService::setupWebServer() {
         #status { padding: 10px; margin: 10px 0; border-radius: 5px; font-weight: bold; }
         #status.connected { background: #004400; color: #00ff00; }
         #status.disconnected { background: #440000; color: #ff0000; }
+        #userInfo { padding: 10px; margin: 10px 0; background: #003300; border: 1px solid #00ff00; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
+        #currentUser { color: #00ff00; font-weight: bold; }
+        #changeUserBtn { padding: 5px 10px; background: #006600; color: #00ff00; border: 1px solid #00ff00; cursor: pointer; border-radius: 3px; font-size: 12px; }
         #messages { border: 1px solid #00ff00; padding: 10px; height: 300px; overflow-y: scroll; margin: 10px 0; background: #000; border-radius: 5px; }
-        .message { margin: 5px 0; padding: 5px; }
-        .sent { color: #ffff00; }
-        .received { color: #00ff00; font-weight: bold; }
-        .error { color: #ff0000; }
-        .info { color: #00aaff; }
+        .message { margin: 8px 0; padding: 8px; border-radius: 5px; }
+        .message .username { font-weight: bold; margin-right: 5px; }
+        .message .timestamp { color: #666; font-size: 11px; margin-right: 5px; }
+        .message .text { display: inline; }
+        .sent { background: #332200; border-left: 3px solid #ffff00; }
+        .sent .username { color: #ffff00; }
+        .sent .text { color: #ffff00; }
+        .received { background: #002200; border-left: 3px solid #00ff00; }
+        .received .username { color: #00ff00; }
+        .received .text { color: #00ff00; }
+        .other-user { background: #001a33; border-left: 3px solid #0088ff; }
+        .other-user .username { color: #0088ff; }
+        .other-user .text { color: #00aaff; }
+        .error { color: #ff0000; background: #220000; border-left: 3px solid #ff0000; }
+        .info { color: #00aaff; background: #001122; border-left: 3px solid #00aaff; }
         .input-group { margin: 10px 0; }
         input { padding: 10px; width: calc(100% - 22px); background: #000; color: #00ff00; border: 1px solid #00ff00; border-radius: 5px; font-size: 16px; }
         button { padding: 10px 20px; background: #00ff00; color: #000; border: none; cursor: pointer; margin: 5px 5px 5px 0; border-radius: 5px; font-weight: bold; }
@@ -150,11 +163,31 @@ void EmergencyWiFiService::setupWebServer() {
         .stat { background: #000; padding: 10px; border: 1px solid #00ff00; border-radius: 5px; text-align: center; }
         .stat-value { font-size: 24px; font-weight: bold; color: #00ff00; }
         .stat-label { font-size: 12px; color: #00aa00; }
+        #usernameModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; }
+        #usernameModal.show { display: flex; align-items: center; justify-content: center; }
+        #usernamePrompt { background: #1e1e1e; padding: 30px; border: 2px solid #00ff00; border-radius: 10px; max-width: 400px; }
+        #usernamePrompt h2 { color: #00ff00; margin-top: 0; }
+        #usernamePrompt input { width: calc(100% - 22px); margin: 10px 0; }
     </style>
 </head>
 <body>
+    <!-- Username Modal -->
+    <div id="usernameModal">
+        <div id="usernamePrompt">
+            <h2>Welcome to Emergency Mesh</h2>
+            <p style="color: #00aa00;">Enter your name to start chatting:</p>
+            <input type="text" id="usernameInput" placeholder="Your name..." maxlength="20">
+            <button onclick="setUsername()" style="width: 100%; margin-top: 10px;">Start Chatting</button>
+        </div>
+    </div>
+
     <h1>Emergency Mesh Network</h1>
     <div id="status" class="disconnected">Connecting...</div>
+
+    <div id="userInfo">
+        <span>Logged in as: <span id="currentUser"></span></span>
+        <button id="changeUserBtn" onclick="changeUsername()">Change Name</button>
+    </div>
 
     <div class="stats">
         <div class="stat">
@@ -178,15 +211,53 @@ void EmergencyWiFiService::setupWebServer() {
         let ws;
         let sentCount = 0;
         let receivedCount = 0;
+        let username = localStorage.getItem('emergencyMeshUsername') || '';
         const messages = document.getElementById('messages');
         const status = document.getElementById('status');
         const input = document.getElementById('messageInput');
 
-        function log(msg, className = '') {
+        function setUsername() {
+            const nameInput = document.getElementById('usernameInput');
+            const name = nameInput.value.trim();
+            if (!name) {
+                alert('Please enter a name');
+                return;
+            }
+            username = name;
+            localStorage.setItem('emergencyMeshUsername', username);
+            document.getElementById('currentUser').textContent = username;
+            document.getElementById('usernameModal').classList.remove('show');
+            connect();
+        }
+
+        function changeUsername() {
+            document.getElementById('usernameInput').value = username;
+            document.getElementById('usernameModal').classList.add('show');
+            document.getElementById('usernameInput').focus();
+        }
+
+        function log(msg, className = '', user = '', time = null) {
             const div = document.createElement('div');
             div.className = 'message ' + className;
-            const time = new Date().toLocaleTimeString();
-            div.textContent = time + ' - ' + msg;
+
+            const timestamp = time || new Date().toLocaleTimeString();
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'timestamp';
+            timeSpan.textContent = timestamp;
+            div.appendChild(timeSpan);
+
+            if (user) {
+                const userSpan = document.createElement('span');
+                userSpan.className = 'username';
+                userSpan.textContent = user + ':';
+                div.appendChild(userSpan);
+            }
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'text';
+            textSpan.textContent = msg;
+            div.appendChild(textSpan);
+
             messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
         }
@@ -216,11 +287,18 @@ void EmergencyWiFiService::setupWebServer() {
                         receivedCount++;
                         updateStats();
 
-                        // Distinguish between WiFi and LoRa messages
+                        const msgUser = data.username || 'Unknown';
+                        const isFromMe = msgUser === username;
+
+                        // Determine message class based on source and user
+                        let msgClass = 'received';
                         if (data.source === 'wifi') {
-                            log('WiFi: ' + data.text + ' (from local client)', 'received');
+                            msgClass = isFromMe ? 'sent' : 'other-user';
+                            log(data.text, msgClass, msgUser);
                         } else {
-                            log('LoRa: ' + data.text + ' (from: ' + data.from + ', RSSI: ' + data.rssi + ' dBm)', 'received');
+                            // LoRa message
+                            const loraInfo = ' (LoRa: ' + data.from + ', RSSI: ' + data.rssi + ' dBm)';
+                            log(data.text + loraInfo, 'received', msgUser);
                         }
                     } else if (data.type === 'node_info') {
                         log('Node ID: ' + data.nodeId, 'info');
@@ -256,13 +334,14 @@ void EmergencyWiFiService::setupWebServer() {
             // Send via WebSocket (will broadcast to all WiFi clients + LoRa mesh)
             const msgObj = {
                 text: msg,
+                username: username,
                 timestamp: Date.now()
             };
             ws.send(JSON.stringify(msgObj));
 
             sentCount++;
             updateStats();
-            log('Sent: ' + msg, 'sent');
+            log(msg, 'sent', username);
             input.value = '';
         }
 
@@ -271,10 +350,21 @@ void EmergencyWiFiService::setupWebServer() {
             if (e.key === 'Enter') sendMessage();
         });
 
-        // Auto-connect on load
-        connect();
-        log('Emergency Mesh Web UI loaded', 'info');
-        log('Waiting for LoRa messages...', 'info');
+        // Username input - send on Enter
+        document.getElementById('usernameInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') setUsername();
+        });
+
+        // Auto-connect on load or show username modal
+        if (username) {
+            document.getElementById('currentUser').textContent = username;
+            connect();
+            log('Emergency Mesh Web UI loaded', 'info');
+            log('Waiting for messages...', 'info');
+        } else {
+            document.getElementById('usernameModal').classList.add('show');
+            document.getElementById('usernameInput').focus();
+        }
     </script>
 </body>
 </html>)";
@@ -352,20 +442,22 @@ void EmergencyWiFiService::handleClientMessage(uint8_t clientId, const char* jso
         return;
     }
 
-    // Extract message text
+    // Extract message text and username
     const char* msgText = inDoc["text"] | inDoc["msg"] | json;  // Try multiple formats
+    const char* userName = inDoc["username"] | "Unknown";
 
     if (!msgText || strlen(msgText) == 0) {
         Serial.println("Empty message, ignoring");
         return;
     }
 
-    Serial.printf("Message text: %s\n", msgText);
+    Serial.printf("Message from '%s': %s\n", userName, msgText);
 
     // 1. Broadcast to all WiFi clients (local chat on same AP)
     DynamicJsonDocument outDoc(512);
     outDoc["type"] = "message";
     outDoc["from"] = "local";  // From another WiFi client on same AP
+    outDoc["username"] = userName;  // Include username
     outDoc["text"] = msgText;
     outDoc["timestamp"] = millis();
     outDoc["rssi"] = 0;  // WiFi messages don't have RSSI
