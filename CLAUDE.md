@@ -39,27 +39,41 @@ This is a **modified Meshtastic implementation** that replaces the standard BLE 
 
 ### Building Emergency WiFi Firmware
 
-This project uses PlatformIO for cross-platform builds. **Primary target: Heltec V2** (`heltec-v2.1`).
+This project uses PlatformIO for cross-platform builds. **Primary target: Heltec WiFi LoRa 32 V2**.
+
+**IMPORTANT**: Use the **POC build environment** for emergency WiFi development:
 
 ```bash
 # Install PlatformIO
 pip install -U platformio
 
-# Build Emergency WiFi variant (Heltec V2)
-pio run -e heltec-v2-emergency-wifi
+# Build Emergency WiFi variant (Heltec V2) - POC Configuration
+pio run -e heltec_v2_pwa_poc
 
 # Flash to device
-pio run -e heltec-v2-emergency-wifi --target upload
+pio run -e heltec_v2_pwa_poc --target upload
 
 # Monitor serial output
 pio device monitor -b 115200
 
-# Build other ESP32 variants for emergency use
-pio run -e tbeam-emergency-wifi
-pio run -e tlora-emergency-wifi
+# Clean build (if needed)
+pio run -e heltec_v2_pwa_poc --target clean
+
+# WORKAROUND: If build fails with ".sconsign314.dblite: No such file or directory"
+# This is a known PlatformIO issue with Python 3.14 - run this once:
+python3 -c "import dbm; dbm.open('.pio/build/heltec_v2_pwa_poc/.sconsign314.dblite', 'c')"
+pio run -e heltec_v2_pwa_poc --target upload
 ```
 
-**Build Configuration**: See `variants/esp32/heltec_v2/platformio.ini` for emergency-specific build flags.
+**Build Configurations**:
+- **`heltec_v2_pwa_poc`** (USE THIS): Emergency WiFi Bridge POC with full networking stack
+  - Config: `variants/esp32/heltec_v2/platformio-poc.ini`
+  - Includes: ESPAsyncWebServer, ArduinoWebSockets, WiFi tuning, Bluetooth disabled
+  - Partition: `huge_app.csv` for larger firmware
+
+- **`heltec-v2_0`** (DON'T USE): Basic Meshtastic build - missing WiFi libraries
+  - Config: `variants/esp32/heltec_v2/platformio.ini`
+  - Too minimal for emergency WiFi features
 
 ### Testing
 

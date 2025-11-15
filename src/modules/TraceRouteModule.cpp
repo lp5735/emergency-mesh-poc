@@ -6,6 +6,9 @@
 #include "mesh/Router.h"
 #include "meshUtils.h"
 #include <vector>
+#ifdef ENABLE_WIFI_AP
+#include "wifi/EmergencyWiFiService.h"
+#endif
 
 extern graphics::Screen *screen;
 
@@ -632,9 +635,22 @@ void TraceRouteModule::handleTraceRouteResult(const String &result)
     resultText = result;
     runState = TRACEROUTE_STATE_RESULT;
     resultShowTime = millis();
+
+    // Get the target node ID in hex format for WiFi display (4-character, last 2 bytes)
+    char targetHex[16];
+    snprintf(targetHex, sizeof(targetHex), "%04x", tracingNode & 0xFFFF);
+
     tracingNode = 0;
 
     LOG_INFO("TraceRoute result ready, requesting focus. Result: %s", result.c_str());
+
+    // Broadcast result to WiFi clients if available
+#ifdef ENABLE_WIFI_AP
+    if (wifiService.isActive()) {
+        wifiService.broadcastTracerouteResult(targetHex, result.c_str());
+        LOG_INFO("TraceRoute result broadcasted to WiFi clients");
+    }
+#endif
 
     setIntervalFromNow(1000);
 

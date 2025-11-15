@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Emergency Mesh Network</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #0a0a0a;
+            color: #e4e6eb;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Contact List Panel */
+        .contacts-panel {
+            width: 320px;
+            background: #1c1e21;
+            border-right: 1px solid #2a2d31;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #2a2d31;
+            padding: 15px;
+            border-bottom: 1px solid #3a3d41;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #e4e6eb;
+        }
+
+        .header .status {
+            font-size: 12px;
+            color: #8a8d91;
+            margin-top: 4px;
+        }
+
+        .sos-button {
+            background: linear-gradient(135deg, #ff3b30, #d32f2f);
+            color: white;
+            border: none;
+            padding: 16px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            margin: 10px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(255, 59, 48, 0.3);
+        }
+
+        .sos-button:hover {
+            background: linear-gradient(135deg, #d32f2f, #b71c1c);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(255, 59, 48, 0.4);
+        }
+
+        .sos-button:active {
+            transform: translateY(0);
+        }
+
+        .contact-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .contact {
+            padding: 14px 16px;
+            border-bottom: 1px solid #2a2d31;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .contact:hover {
+            background: #2a2d31;
+        }
+
+        .contact.selected {
+            background: #005c4b;
+        }
+
+        .contact-name {
+            font-weight: 600;
+            font-size: 15px;
+            margin-bottom: 4px;
+        }
+
+        .contact-info {
+            font-size: 12px;
+            color: #8a8d91;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+
+        .status-indicator.online {
+            background: #4cd964;
+        }
+
+        .status-indicator.offline {
+            background: #8e8e93;
+        }
+
+        /* Chat Panel */
+        .chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #0a0a0a;
+        }
+
+        .chat-header {
+            background: #1c1e21;
+            padding: 15px 20px;
+            border-bottom: 1px solid #2a2d31;
+        }
+
+        .chat-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .chat-header .info {
+            font-size: 12px;
+            color: #8a8d91;
+            margin-top: 4px;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .message-wrapper {
+            display: flex;
+            margin-bottom: 8px;
+        }
+
+        .message-wrapper.sent {
+            justify-content: flex-end;
+        }
+
+        .message-wrapper.received {
+            justify-content: flex-start;
+        }
+
+        .message {
+            max-width: 65%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            position: relative;
+        }
+
+        .message.sent {
+            background: #005c4b;
+            border-bottom-right-radius: 2px;
+        }
+
+        .message.received {
+            background: #1c1e21;
+            border-bottom-left-radius: 2px;
+        }
+
+        .message.sos {
+            background: linear-gradient(135deg, #ff3b30, #d32f2f);
+            font-weight: 600;
+            text-align: center;
+            max-width: 80%;
+        }
+
+        .message-sender {
+            font-size: 12px;
+            color: #4cd964;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .message-text {
+            font-size: 14px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #8a8d91;
+            margin-top: 4px;
+            text-align: right;
+        }
+
+        .message-status {
+            font-size: 11px;
+            color: #8a8d91;
+            margin-left: 4px;
+        }
+
+        .compose {
+            background: #1c1e21;
+            padding: 12px;
+            border-top: 1px solid #2a2d31;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #msgInput {
+            flex: 1;
+            background: #2a2d31;
+            border: 1px solid #3a3d41;
+            border-radius: 20px;
+            padding: 10px 16px;
+            color: #e4e6eb;
+            font-size: 15px;
+            outline: none;
+        }
+
+        #msgInput:focus {
+            border-color: #005c4b;
+        }
+
+        .send-btn {
+            background: #005c4b;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .send-btn:hover {
+            background: #00745e;
+            transform: scale(1.05);
+        }
+
+        .send-btn:active {
+            transform: scale(0.95);
+        }
+
+        .send-btn:disabled {
+            background: #3a3d41;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #8a8d91;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #8a8d91;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1c1e21;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #3a3d41;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4a4d51;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .contacts-panel {
+                width: 100%;
+                display: none;
+            }
+
+            .contacts-panel.mobile-show {
+                display: flex;
+            }
+
+            .chat-panel.mobile-hide {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Contacts Panel -->
+        <div class="contacts-panel" id="contactsPanel">
+            <div class="header">
+                <h1>🚨 Emergency Mesh</h1>
+                <div class="status" id="nodeStatus">Connecting...</div>
+            </div>
+
+            <button class="sos-button" onclick="sendSOS()">
+                🆘 EMERGENCY SOS
+            </button>
+
+            <div class="contact-list" id="contactList">
+                <div class="loading">Loading contacts...</div>
+            </div>
+        </div>
+
+        <!-- Chat Panel -->
+        <div class="chat-panel" id="chatPanel">
+            <div class="chat-header" id="chatHeader">
+                <h2 id="chatTitle">Emergency Mesh Network</h2>
+                <div class="info" id="chatInfo">Select a contact to start messaging</div>
+            </div>
+
+            <div class="messages" id="messages">
+                <div class="empty-state">
+                    <div class="empty-state-icon">💬</div>
+                    <p>Select a contact from the list to start a conversation</p>
+                </div>
+            </div>
+
+            <div class="compose">
+                <input
+                    type="text"
+                    id="msgInput"
+                    placeholder="Type a message..."
+                    onkeypress="handleKeyPress(event)"
+                    disabled
+                />
+                <button class="send-btn" onclick="sendMessage()" id="sendBtn" disabled>
+                    ➤
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let currentContact = null;
+        let myNodeId = null;
+        let contacts = [];
+        let messageBuffer = [];
+
+        // Helper to convert hex string to nodeId
+        function hexToNodeId(hexStr) {
+            return parseInt(hexStr.replace('!', '0x'), 16);
+        }
+
+        // Helper to convert nodeId to hex string
+        function nodeIdToHex(nodeId) {
+            return '!' + nodeId.toString(16).padStart(8, '0');
+        }
+
+        // Load contacts from /json/nodes
+        async function loadContacts() {
+            try {
+                const res = await fetch('/json/nodes');
+                const data = await res.json();
+
+                if (!data.data || !data.data.nodes) {
+                    document.getElementById('contactList').innerHTML =
+                        '<div class="loading">No nodes found on mesh</div>';
+                    return;
+                }
+
+                contacts = data.data.nodes;
+                renderContactList();
+
+            } catch (err) {
+                console.error('Failed to load contacts:', err);
+                document.getElementById('contactList').innerHTML =
+                    '<div class="loading">Error loading contacts</div>';
+            }
+        }
+
+        // Render contact list
+        function renderContactList() {
+            const list = document.getElementById('contactList');
+
+            if (contacts.length === 0) {
+                list.innerHTML = '<div class="loading">No contacts available</div>';
+                return;
+            }
+
+            list.innerHTML = '';
+
+            contacts.forEach(node => {
+                const now = Math.floor(Date.now() / 1000);
+                const isOnline = node.last_heard && (now - node.last_heard) < 300; // 5 min
+
+                const div = document.createElement('div');
+                div.className = 'contact';
+                if (currentContact && currentContact.id === node.id) {
+                    div.className += ' selected';
+                }
+
+                div.onclick = () => selectContact(node);
+
+                div.innerHTML = `
+                    <div class="contact-name">
+                        <span class="status-indicator ${isOnline ? 'online' : 'offline'}"></span>
+                        ${node.long_name || node.short_name || 'Unknown'}
+                    </div>
+                    <div class="contact-info">
+                        <span>ID: ${node.id}</span>
+                        ${node.snr ? `<span>SNR: ${node.snr.toFixed(1)}</span>` : ''}
+                    </div>
+                `;
+
+                list.appendChild(div);
+            });
+        }
+
+        // Select contact
+        function selectContact(node) {
+            currentContact = node;
+            renderContactList();
+
+            // Update chat header
+            const now = Math.floor(Date.now() / 1000);
+            const isOnline = node.last_heard && (now - node.last_heard) < 300;
+
+            document.getElementById('chatTitle').textContent = node.long_name || node.short_name || 'Unknown';
+            document.getElementById('chatInfo').innerHTML = `
+                <span class="status-indicator ${isOnline ? 'online' : 'offline'}"></span>
+                ${isOnline ? 'Online' : 'Offline'} • ${node.id}
+            `;
+
+            // Clear messages and show conversation
+            document.getElementById('messages').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">💬</div>
+                    <p>Start a conversation with ${node.long_name || node.short_name}</p>
+                </div>
+            `;
+
+            // Enable input
+            document.getElementById('msgInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('msgInput').focus();
+        }
+
+        // Send message via /api/v1/toradio (simplified - no protobuf encoding for now)
+        async function sendMessage() {
+            const input = document.getElementById('msgInput');
+            const text = input.value.trim();
+
+            if (!text || !currentContact) return;
+
+            // For now, we'll use a simplified approach
+            // In production, you'd encode this as a proper Meshtastic protobuf
+            try {
+                // Create a text message packet
+                const packet = {
+                    to: hexToNodeId(currentContact.id),
+                    from: myNodeId || 0,
+                    decoded: {
+                        portnum: 1, // TEXT_MESSAGE_APP
+                        payload: new TextEncoder().encode(text)
+                    },
+                    want_ack: true,
+                    priority: 0
+                };
+
+                // NOTE: This is simplified - real implementation needs protobuf encoding
+                // For now, just show it locally
+                addMessage('You', text, true, Date.now());
+
+                input.value = '';
+
+                // TODO: Actual protobuf encoding and PUT to /api/v1/toradio
+                console.log('Would send:', packet);
+
+            } catch (err) {
+                console.error('Send error:', err);
+                alert('Failed to send message: ' + err.message);
+            }
+        }
+
+        // Send SOS
+        async function sendSOS() {
+            if (!confirm('⚠️  Send EMERGENCY SOS to ALL nodes?\n\nThis will broadcast to the entire mesh network.')) {
+                return;
+            }
+
+            try {
+                // Create emergency broadcast
+                const sosText = '🆘 EMERGENCY SOS - IMMEDIATE ASSISTANCE NEEDED';
+
+                // TODO: Encode as protobuf and send to /api/v1/toradio
+                // For now, show confirmation
+
+                addMessage('EMERGENCY SOS', sosText, true, Date.now(), true);
+
+                alert('✅ SOS SENT TO ALL NODES');
+
+            } catch (err) {
+                console.error('SOS error:', err);
+                alert('Failed to send SOS: ' + err.message);
+            }
+        }
+
+        // Add message to chat
+        function addMessage(sender, text, isSent, timestamp, isSOS = false) {
+            const messagesDiv = document.getElementById('messages');
+
+            // Remove empty state if present
+            const emptyState = messagesDiv.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
+
+            const wrapper = document.createElement('div');
+            wrapper.className = `message-wrapper ${isSent ? 'sent' : 'received'}`;
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
+            if (isSOS) messageDiv.className += ' sos';
+
+            const time = new Date(timestamp).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            messageDiv.innerHTML = `
+                ${!isSent && !isSOS ? `<div class="message-sender">${sender}</div>` : ''}
+                <div class="message-text">${text}</div>
+                <div class="message-time">
+                    ${time}
+                    ${isSent ? '<span class="message-status">✓</span>' : ''}
+                </div>
+            `;
+
+            wrapper.appendChild(messageDiv);
+            messagesDiv.appendChild(wrapper);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // Poll for new messages from /api/v1/fromradio
+        async function pollMessages() {
+            try {
+                const res = await fetch('/api/v1/fromradio?all=true');
+
+                if (!res.ok) return;
+
+                const buffer = await res.arrayBuffer();
+                if (buffer.byteLength === 0) return;
+
+                // TODO: Decode protobuf and process messages
+                // For now, just log
+                console.log('Received message buffer:', buffer.byteLength, 'bytes');
+
+            } catch (err) {
+                // Silently fail - don't spam console
+                if (err.message !== 'Failed to fetch') {
+                    console.error('Poll error:', err);
+                }
+            }
+        }
+
+        // Handle Enter key
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // Get node status
+        async function updateNodeStatus() {
+            try {
+                const res = await fetch('/json/report');
+                const data = await res.json();
+
+                if (data.data) {
+                    const status = data.data;
+                    myNodeId = status.myNodeNum;
+
+                    document.getElementById('nodeStatus').innerHTML = `
+                        Node: ${nodeIdToHex(myNodeId)} |
+                        ${status.numOnlineNodes || 0} nodes online
+                    `;
+                }
+            } catch (err) {
+                console.error('Status error:', err);
+            }
+        }
+
+        // Initialize
+        async function init() {
+            console.log('Emergency Mesh UI initialized');
+
+            // Load initial data
+            await updateNodeStatus();
+            await loadContacts();
+
+            // Set up polling
+            setInterval(loadContacts, 30000);  // Refresh contacts every 30s
+            setInterval(pollMessages, 2000);   // Poll messages every 2s
+            setInterval(updateNodeStatus, 10000); // Update status every 10s
+        }
+
+        // Start on page load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>

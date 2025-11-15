@@ -27,6 +27,14 @@ class EmergencyWiFiBridge : public SinglePortModule, private concurrency::OSThre
      */
     bool sendTextToMesh(const char *message);
 
+    /**
+     * Start a traceroute to a specific node
+     * @param nodeNum Target node number (full 32-bit NodeNum)
+     * @param targetStr 4-character hex string for result display
+     * @return true if traceroute started successfully
+     */
+    bool startTraceroute(uint32_t nodeNum, const char *targetStr);
+
   protected:
     /** Called to handle a particular incoming message
      * @return ProcessMessage::STOP if handled, ProcessMessage::CONTINUE if someone else should handle it

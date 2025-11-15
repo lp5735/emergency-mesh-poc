@@ -23,16 +23,34 @@ WiFiMeshBridge::WiFiMeshBridge()
 
 void WiFiMeshBridge::init() {
     Serial.println("\n=== WiFi Mesh Bridge Initialization ===");
+    Serial.flush();
 
     // Setup WiFi AP with DHCP
+    Serial.println("Step 1: Setting up WiFi AP...");
+    Serial.flush();
     setupWiFiAP();
+    Serial.println("Step 1: WiFi AP setup complete");
+    Serial.flush();
+
+    Serial.println("Step 2: Setting up DHCP...");
+    Serial.flush();
     setupDHCP();
+    Serial.println("Step 2: DHCP setup complete");
+    Serial.flush();
 
     // Register WiFi event handlers
+    Serial.println("Step 3: Registering WiFi events...");
+    Serial.flush();
     WiFi.onEvent(onWiFiEvent);
+    Serial.println("Step 3: WiFi events registered");
+    Serial.flush();
 
     // Setup network packet interception
+    Serial.println("Step 4: Setting up network bridge...");
+    Serial.flush();
     setupNetworkBridge();
+    Serial.println("Step 4: Network bridge setup complete");
+    Serial.flush();
 
     apActive = true;
     clientCount = 0;
@@ -45,6 +63,7 @@ void WiFiMeshBridge::init() {
     Serial.println("  ✓ Transparent IP packet routing");
     Serial.println("  ✓ P2P apps work across LoRa mesh");
     Serial.println("===================================\n");
+    Serial.flush();
 }
 
 void WiFiMeshBridge::setupWiFiAP() {

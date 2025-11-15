@@ -5,6 +5,7 @@
 #include "MeshService.h"
 #include "Router.h"
 #include "wifi/EmergencyWiFiService.h"
+#include "TraceRouteModule.h"
 #include <ArduinoJson.h>
 
 EmergencyWiFiBridge *emergencyWiFiBridge;
@@ -58,6 +59,26 @@ bool EmergencyWiFiBridge::sendTextToMesh(const char *message)
         Serial.printf("EmergencyWiFiBridge: ✗ Failed to send, error code: %d\n", result);
         return false;
     }
+}
+
+bool EmergencyWiFiBridge::startTraceroute(uint32_t nodeNum, const char *targetStr)
+{
+    if (!traceRouteModule) {
+        Serial.println("EmergencyWiFiBridge: ERROR - TraceRouteModule not available");
+        return false;
+    }
+
+    Serial.printf("EmergencyWiFiBridge: Starting traceroute to node 0x%08x (%s)\n", nodeNum, targetStr);
+
+    bool result = traceRouteModule->startTraceRoute(nodeNum);
+
+    if (result) {
+        Serial.printf("EmergencyWiFiBridge: Traceroute started successfully to 0x%08x\n", nodeNum);
+    } else {
+        Serial.printf("EmergencyWiFiBridge: Failed to start traceroute to 0x%08x\n", nodeNum);
+    }
+
+    return result;
 }
 
 ProcessMessage EmergencyWiFiBridge::handleReceived(const meshtastic_MeshPacket &mp)
