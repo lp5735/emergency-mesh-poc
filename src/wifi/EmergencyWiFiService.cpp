@@ -122,10 +122,10 @@ void EmergencyWiFiService::setupWebServer() {
         }
     });
 
-    // Root path - serve interactive web UI
+    // Root path - serve interactive web UI (HTML stored in PROGMEM to save RAM)
     httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         Serial.println("Root path requested - serving web UI");
-        const char* html = R"HTML(<!DOCTYPE html>
+        static const char html[] PROGMEM = R"HTML(<!DOCTYPE html>
 <html>
 <head>
     <title>Emergency Mesh</title>
@@ -368,7 +368,7 @@ void EmergencyWiFiService::setupWebServer() {
     </script>
 </body>
 </html>)HTML";
-        request->send(200, "text/html", html);
+        request->send_P(200, "text/html", html);
     });
 
     // Log all other requests
