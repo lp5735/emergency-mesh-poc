@@ -39,20 +39,31 @@ static const char MINIMAL_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:Arial,sans-serif;background:#111;color:#0f0;padding:10px}
 h1{font-size:18px;margin-bottom:10px;color:#f00}
+a{color:#0ff;font-size:12px}
 #status{padding:8px;background:#222;border:1px solid #0f0;margin-bottom:10px;font-size:12px}
-#messages{height:300px;overflow-y:auto;background:#000;border:1px solid #0f0;padding:10px;margin-bottom:10px}
+#messages{height:250px;overflow-y:auto;background:#000;border:1px solid #0f0;padding:10px;margin-bottom:10px}
 .msg{margin:5px 0;padding:5px;border-left:3px solid #0f0}
 .msg.sent{border-color:#ff0}
 .msg.lora{border-color:#0ff}
-input{width:calc(100% - 70px);padding:8px;background:#222;color:#0f0;border:1px solid #0f0}
+.msg.traceroute{border-color:#f80;color:#f80}
+input{width:calc(100%% - 70px);padding:8px;background:#222;color:#0f0;border:1px solid #0f0}
 button{padding:8px 15px;background:#0a0;color:#fff;border:none;cursor:pointer}
 button:hover{background:#0c0}
-.sos{background:#f00;color:#fff;width:100%;padding:12px;margin-bottom:10px;font-weight:bold}
+.sos{background:#f00;color:#fff;width:48%%;padding:12px;margin-bottom:10px;font-weight:bold;margin-right:2%%}
+.trace{background:#f80;color:#fff;width:48%%;padding:12px;margin-bottom:10px;font-weight:bold}
+.trace-input{width:60px;padding:8px;background:#222;color:#f80;border:1px solid #f80;text-transform:uppercase;margin-left:5px}
+.inline{display:inline-block}
 </style>
 </head>
 <body>
-<h1>🚨 Emergency Mesh</h1>
-<button class="sos" onclick="sendSOS()">🆘 EMERGENCY SOS</button>
+<h1>🚨 Emergency Mesh <a href="/debug">Debug</a></h1>
+<button class="sos inline" onclick="sendSOS()">🆘 EMERGENCY SOS</button>
+<button class="trace inline" onclick="traceRoute()">🔍 Trace Route</button>
+<div style="margin-bottom:10px">
+<span style="color:#f80">Node ID:</span>
+<input id="nodeId" class="trace-input" placeholder="abcd" maxlength="4" value="">
+<small style="color:#888;margin-left:10px">(4-char hex, e.g., "1234")</small>
+</div>
 <div id="status">Connecting...</div>
 <div id="messages"></div>
 <input id="msg" placeholder="Type message..." onkeypress="if(event.key==='Enter')send()">
@@ -62,12 +73,18 @@ button:hover{background:#0c0}
 let ws;
 function connect(){
 ws=new WebSocket('ws://'+location.hostname+':81');
-ws.onopen=()=>log('Connected','info');
+ws.onopen=()=>{log('Connected','info');updateStatus('Connected',true)};
 ws.onmessage=e=>{
 try{
 const d=JSON.parse(e.data);
 if(d.type==='message'){
 log(d.text,d.source,d.from);
+}else if(d.type==='traceroute_started'){
+log('Trace route started to node 0x'+d.target,'traceroute');
+}else if(d.type==='traceroute_result'){
+log('Route: '+d.route,'traceroute');
+}else if(d.type==='traceroute_error'){
+log('Trace route error: '+d.error,'traceroute');
 }
 }catch(err){console.error(err)}
 };
@@ -91,10 +108,36 @@ log('🆘 EMERGENCY SOS SENT','sent');
 }
 }
 
+function traceRoute(){
+const n=document.getElementById('nodeId');
+if(!n.value||n.value.length!==4){
+alert('Please enter a 4-character hex node ID (e.g., "abcd")');
+return;
+}
+if(!ws||ws.readyState!==1){
+alert('Not connected to mesh!');
+return;
+}
+const nodeId=n.value.toLowerCase();
+if(!/^[0-9a-f]{4}$/.test(nodeId)){
+alert('Invalid hex characters. Use 0-9 and a-f only.');
+return;
+}
+ws.send(JSON.stringify({type:'traceroute',target:nodeId,timestamp:Date.now()}));
+log('Requesting trace route to 0x'+nodeId+'...','traceroute');
+}
+
+function updateStatus(text,connected){
+const s=document.getElementById('status');
+s.textContent=text;
+s.style.background=connected?'#040':'#400';
+s.style.borderColor=connected?'#0f0':'#f00';
+}
+
 function log(text,type='info',from=''){
 const d=document.getElementById('messages');
 const m=document.createElement('div');
-m.className='msg '+(type==='sent'?'sent':type==='lora'?'lora':'');
+m.className='msg '+(type==='sent'?'sent':type==='lora'?'lora':type==='traceroute'?'traceroute':'');
 m.innerHTML='<b>'+new Date().toLocaleTimeString()+'</b> '+(from?from+': ':'')+text;
 d.appendChild(m);
 d.scrollTop=d.scrollHeight;
@@ -347,6 +390,13 @@ void EmergencyWiFiService::handleClientMessage(uint8_t clientId, const char* jso
         return;
     }
 
+    // Check if this is a traceroute command
+    const char* msgType = inDoc["type"];
+    if (msgType && strcmp(msgType, "traceroute") == 0) {
+        handleTracerouteRequest(clientId, inDoc);
+        return;
+    }
+
     // Extract message text and username
     const char* msgText = inDoc["text"] | inDoc["msg"] | json;  // Try multiple formats
     const char* userName = inDoc["username"] | "Unknown";
@@ -397,6 +447,71 @@ void EmergencyWiFiService::sendNodeInfo(uint8_t clientId) {
 
     wsServer.sendTXT(clientId, json);
     Serial.printf("Sent node info to client %u: %s\n", clientId, json.c_str());
+}
+
+void EmergencyWiFiService::handleTracerouteRequest(uint8_t clientId, JsonDocument& doc) {
+    const char* targetStr = doc["target"];
+
+    if (!targetStr || strlen(targetStr) != 4) {
+        DynamicJsonDocument errorDoc(256);
+        errorDoc["type"] = "traceroute_error";
+        errorDoc["error"] = "Invalid target: must be 4-character hex";
+        String errorJson;
+        serializeJson(errorDoc, errorJson);
+        wsServer.sendTXT(clientId, errorJson);
+        Serial.printf("Traceroute error: invalid target format\n");
+        return;
+    }
+
+    // Convert 4-char hex string to NodeNum (0x********XXXX)
+    // Meshtastic NodeNum is typically 0x + 8 hex digits
+    // We'll use the last 4 chars from the user, padded with zeros
+    char nodeNumStr[16];
+    snprintf(nodeNumStr, sizeof(nodeNumStr), "0000%s", targetStr);
+    uint32_t nodeNum = (uint32_t)strtoul(nodeNumStr, NULL, 16);
+
+    Serial.printf("Traceroute request: target=%s, nodeNum=0x%08x\n", targetStr, nodeNum);
+
+    // Send acknowledgment to client
+    DynamicJsonDocument ackDoc(256);
+    ackDoc["type"] = "traceroute_started";
+    ackDoc["target"] = targetStr;
+    String ackJson;
+    serializeJson(ackDoc, ackJson);
+    wsServer.sendTXT(clientId, ackJson);
+
+    // Trigger traceroute via EmergencyWiFiBridge
+    if (emergencyWiFiBridge) {
+        if (!emergencyWiFiBridge->startTraceroute(nodeNum, targetStr)) {
+            DynamicJsonDocument errorDoc(256);
+            errorDoc["type"] = "traceroute_error";
+            errorDoc["error"] = "Failed to start traceroute";
+            String errorJson;
+            serializeJson(errorDoc, errorJson);
+            wsServer.sendTXT(clientId, errorJson);
+        }
+    } else {
+        DynamicJsonDocument errorDoc(256);
+        errorDoc["type"] = "traceroute_error";
+        errorDoc["error"] = "Mesh bridge not available";
+        String errorJson;
+        serializeJson(errorDoc, errorJson);
+        wsServer.sendTXT(clientId, errorJson);
+    }
+}
+
+void EmergencyWiFiService::broadcastTracerouteResult(const char* target, const char* route) {
+    DynamicJsonDocument doc(1024);
+    doc["type"] = "traceroute_result";
+    doc["target"] = target;
+    doc["route"] = route;
+    doc["timestamp"] = millis();
+
+    String json;
+    serializeJson(doc, json);
+
+    broadcastToClients(json.c_str());
+    Serial.printf("Broadcast traceroute result: %s\n", json.c_str());
 }
 
 void EmergencyWiFiService::loop() {
