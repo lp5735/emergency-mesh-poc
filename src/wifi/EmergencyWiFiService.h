@@ -24,6 +24,9 @@ public:
     // Node info
     uint32_t getNodeId();
 
+    // Mesh status updates
+    void broadcastMeshStatus();
+
 private:
     AsyncWebServer httpServer;
     WebSocketsServer wsServer;
@@ -31,6 +34,7 @@ private:
     bool apActive;
     uint8_t clientCount;
     uint32_t lastClientActivity;
+    uint32_t lastMeshStatusBroadcast;
 
     void setupWiFiAP();
     void setupWebServer();

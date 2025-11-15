@@ -5,6 +5,8 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include "modules/EmergencyWiFiBridge.h"
+#include "mesh/NodeDB.h"
+#include "gps/RTC.h"
 
 // Service Worker for PWA offline capability (~400 bytes)
 static const char SERVICE_WORKER_JS[] PROGMEM = R"JS(const CACHE='v1';
@@ -26,7 +28,7 @@ static const char MANIFEST_JSON[] PROGMEM = R"JSON({
 "icons":[{"src":"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23f00'/%3E%3Ctext x='50' y='65' font-size='50' text-anchor='middle' fill='%23fff'%3E🚨%3C/text%3E%3C/svg%3E","sizes":"512x512","type":"image/svg+xml"}]
 })JSON";
 
-// PWA-enabled HTML with message persistence - MUST be file-level const for AsyncWebServer multi-client reliability
+// Ultra-minimal main page (~1.5KB) - messaging only
 static const char MINIMAL_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 <html>
 <head>
@@ -39,11 +41,12 @@ static const char MINIMAL_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:Arial,sans-serif;background:#111;color:#0f0;padding:10px}
 h1{font-size:18px;margin-bottom:10px;color:#f00}
-#status{padding:8px;background:#222;border:1px solid #0f0;margin-bottom:10px;font-size:12px}
-#messages{height:300px;overflow-y:auto;background:#000;border:1px solid #0f0;padding:10px;margin-bottom:10px}
+a{color:#0ff;font-size:12px}
+#s{padding:8px;background:#222;border:1px solid #0f0;margin-bottom:10px;font-size:12px}
+#m{height:350px;overflow-y:auto;background:#000;border:1px solid #0f0;padding:10px;margin-bottom:10px}
 .msg{margin:5px 0;padding:5px;border-left:3px solid #0f0}
-.msg.sent{border-color:#ff0}
-.msg.lora{border-color:#0ff}
+.sent{border-color:#ff0}
+.lora{border-color:#0ff}
 input{width:calc(100% - 70px);padding:8px;background:#222;color:#0f0;border:1px solid #0f0}
 button{padding:8px 15px;background:#0a0;color:#fff;border:none;cursor:pointer}
 button:hover{background:#0c0}
@@ -51,67 +54,139 @@ button:hover{background:#0c0}
 </style>
 </head>
 <body>
-<h1>🚨 Emergency Mesh</h1>
-<button class="sos" onclick="sendSOS()">🆘 EMERGENCY SOS</button>
-<div id="status">Connecting...</div>
-<div id="messages"></div>
-<input id="msg" placeholder="Type message..." onkeypress="if(event.key==='Enter')send()">
+<h1>🚨 Emergency Mesh <a href="/debug">Debug</a></h1>
+<input id="u" placeholder="Your name..." style="width:100%;margin-bottom:10px;padding:8px;background:#222;color:#0f0;border:1px solid #0f0">
+<button class="sos" onclick="sos()">🆘 EMERGENCY SOS</button>
+<div id="s">Connecting...</div>
+<div id="m"></div>
+<input id="i" placeholder="Type message..." onkeypress="if(event.key==='Enter')send()">
 <button onclick="send()">Send</button>
 
 <script>
-let ws;
-function connect(){
+let ws,r=0;
+function upd(t,c){
+const s=document.getElementById('s');
+s.textContent=t;
+s.style.background=c?'#040':'#400';
+s.style.borderColor=c?'#0f0':'#f00';
+}
+function con(){
+if(ws&&ws.readyState===WebSocket.CONNECTING)return;
 ws=new WebSocket('ws://'+location.hostname+':81');
-ws.onopen=()=>log('Connected','info');
+ws.onopen=()=>{r=0;upd('Connected',1)};
 ws.onmessage=e=>{
 try{
 const d=JSON.parse(e.data);
-if(d.type==='message'){
-log(d.text,d.source,d.from);
-}
-}catch(err){console.error(err)}
+if(d.type==='message')log(d.text,d.source||'lora',d.username||d.from||'Unknown');
+}catch(err){}
 };
-ws.onerror=()=>log('Error','error');
-ws.onclose=()=>{log('Disconnected','error');setTimeout(connect,3000)};
+ws.onerror=()=>upd('Error',0);
+ws.onclose=()=>{r++;upd('Reconnecting('+r+')...',0);setTimeout(con,Math.min(3000,1000*r))};
 }
-
 function send(){
-const m=document.getElementById('msg');
+const m=document.getElementById('i');
+const u=document.getElementById('u');
 if(!m.value||!ws||ws.readyState!==1)return;
-ws.send(JSON.stringify({text:m.value,timestamp:Date.now()}));
-log(m.value,'sent');
+const usr=u.value.trim()||'User';
+localStorage.setItem('usr',usr);
+ws.send(JSON.stringify({text:m.value,username:usr,timestamp:Date.now()}));
+log(m.value,'sent',usr);
 m.value='';
 }
-
-function sendSOS(){
-if(!confirm('Send EMERGENCY SOS?'))return;
+function sos(){
+if(!confirm('Send SOS?'))return;
 if(ws&&ws.readyState===1){
-ws.send(JSON.stringify({text:'🆘 EMERGENCY SOS',timestamp:Date.now()}));
-log('🆘 EMERGENCY SOS SENT','sent');
+const u=document.getElementById('u');
+const usr=u.value.trim()||'User';
+localStorage.setItem('usr',usr);
+ws.send(JSON.stringify({text:'🆘 SOS',username:usr,timestamp:Date.now()}));
+log('🆘 SOS SENT','sent',usr);
 }
 }
-
-function log(text,type='info',from=''){
-const d=document.getElementById('messages');
+function log(t,ty='info',usr=''){
+const d=document.getElementById('m');
 const m=document.createElement('div');
-m.className='msg '+(type==='sent'?'sent':type==='lora'?'lora':'');
-m.innerHTML='<b>'+new Date().toLocaleTimeString()+'</b> '+(from?from+': ':'')+text;
+m.className='msg '+(ty==='sent'?'sent':'lora');
+const prefix=usr?'<b style="color:#0ff">'+usr+'</b>: ':'';
+m.innerHTML='<small>'+new Date().toLocaleTimeString()+'</small> '+prefix+t;
 d.appendChild(m);
 d.scrollTop=d.scrollHeight;
-let h=JSON.parse(localStorage.getItem('msgHistory')||'[]');
-h.push({text,type,from,time:Date.now()});
-if(h.length>100)h.shift();
-localStorage.setItem('msgHistory',JSON.stringify(h));
+let h=JSON.parse(localStorage.getItem('h')||'[]');
+h.push({t,ty,usr,tm:Date.now()});
+if(h.length>50)h.shift();
+localStorage.setItem('h',JSON.stringify(h));
 }
-
 window.onload=()=>{
-let h=JSON.parse(localStorage.getItem('msgHistory')||'[]');
-h.forEach(m=>log(m.text,m.type,m.from));
-connect();
-if('serviceWorker'in navigator){
-navigator.serviceWorker.register('/sw.js').then(()=>console.log('SW registered')).catch(e=>console.log('SW failed',e));
-}
+const u=document.getElementById('u');
+u.value=localStorage.getItem('usr')||'';
+u.addEventListener('blur',()=>localStorage.setItem('usr',u.value.trim()));
+let h=JSON.parse(localStorage.getItem('h')||'[]');
+h.forEach(m=>log(m.t,m.ty,m.usr));
+con();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js');
 };
+window.addEventListener('online',()=>{if(!ws||ws.readyState===WebSocket.CLOSED)con()});
+window.addEventListener('offline',()=>upd('Offline',0));
+</script>
+</body>
+</html>)HTML";
+
+// Debug page for mesh status (~2KB)
+static const char DEBUG_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mesh Debug</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#111;color:#0f0;padding:10px}
+h1{font-size:18px;margin-bottom:10px;color:#f00}
+a{color:#0ff;font-size:12px}
+#s{padding:8px;background:#222;border:1px solid #0f0;margin-bottom:10px;font-size:12px}
+#d{padding:10px;background:#000;border:1px solid #0f0}
+#d b{color:#ff0}
+#st{color:#0ff;font-weight:bold}
+#n{margin-top:10px}
+</style>
+</head>
+<body>
+<h1>📡 Mesh Debug <a href="/">Back</a></h1>
+<div id="s">Connecting...</div>
+<div id="d"><b>Mesh Status:</b> <span id="st">...</span><div id="n"></div></div>
+<script>
+let ws,r=0;
+function upd(t,c){
+const s=document.getElementById('s');
+s.textContent=t;
+s.style.background=c?'#040':'#400';
+s.style.borderColor=c?'#0f0':'#f00';
+}
+function con(){
+if(ws&&ws.readyState===WebSocket.CONNECTING)return;
+ws=new WebSocket('ws://'+location.hostname+':81');
+ws.onopen=()=>{r=0;upd('Connected',1)};
+ws.onmessage=e=>{
+try{
+const d=JSON.parse(e.data);
+if(d.type==='mesh_status')mesh(d);
+}catch(err){}
+};
+ws.onerror=()=>upd('Error',0);
+ws.onclose=()=>{r++;upd('Reconnecting('+r+')...',0);setTimeout(con,Math.min(3000,1000*r))};
+}
+function mesh(d){
+const st=document.getElementById('st');
+const n=document.getElementById('n');
+st.textContent=(d.online_nodes||0)+'/'+(d.total_nodes||0);
+if(!d.nodes||!d.nodes.length){n.innerHTML='<small>No nodes</small>';return}
+n.innerHTML=d.nodes.map(x=>{
+const c=(x.snr+20)/30*100>60?'#0f0':(x.snr+20)/30*100>30?'#ff0':'#f00';
+const ago=x.seconds_ago<60?x.seconds_ago+'s':Math.floor(x.seconds_ago/60)+'m';
+return`<div style="margin:5px 0;padding:5px;background:#000;border-left:3px solid ${c}"><b style="color:#0ff">${x.id}</b> ${x.long_name||x.short_name||'?'}<br><small>SNR:${x.snr.toFixed(1)} | ${ago} ago ${x.is_online?'🟢':'🔴'}</small></div>`;
+}).join('');
+}
+window.onload=con;
 </script>
 </body>
 </html>)HTML";
@@ -119,7 +194,7 @@ navigator.serviceWorker.register('/sw.js').then(()=>console.log('SW registered')
 EmergencyWiFiService wifiService;
 
 EmergencyWiFiService::EmergencyWiFiService()
-    : httpServer(80), wsServer(81), apActive(false), clientCount(0), lastClientActivity(0) {
+    : httpServer(80), wsServer(81), apActive(false), clientCount(0), lastClientActivity(0), lastMeshStatusBroadcast(0) {
 }
 
 void EmergencyWiFiService::init() {
@@ -240,6 +315,16 @@ void EmergencyWiFiService::setupWebServer() {
         response->addHeader("Cache-Control", "no-cache");
         request->send(response);
         Serial.printf("Sent PWA HTML to %s\n", request->client()->remoteIP().toString().c_str());
+    });
+
+    // Debug page - mesh status display
+    httpServer.on("/debug", HTTP_GET, [](AsyncWebServerRequest *request) {
+        Serial.printf("Debug page requested from %s\n", request->client()->remoteIP().toString().c_str());
+        AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", DEBUG_HTML);
+        response->addHeader("Connection", "close");
+        response->addHeader("Cache-Control", "no-cache");
+        request->send(response);
+        Serial.printf("Sent debug HTML to %s\n", request->client()->remoteIP().toString().c_str());
     });
 
     // Service Worker for PWA offline capability
@@ -401,6 +486,15 @@ void EmergencyWiFiService::sendNodeInfo(uint8_t clientId) {
 
 void EmergencyWiFiService::loop() {
     wsServer.loop();
+
+    // Broadcast mesh status every 5 seconds if we have connected clients
+    if (clientCount > 0) {
+        uint32_t now = millis();
+        if (now - lastMeshStatusBroadcast > 5000) {  // 5 seconds
+            broadcastMeshStatus();
+            lastMeshStatusBroadcast = now;
+        }
+    }
 }
 
 void EmergencyWiFiService::stop() {
@@ -426,6 +520,75 @@ uint32_t EmergencyWiFiService::getNodeId() {
     uint8_t mac[6];
     WiFi.macAddress(mac);
     return (mac[4] << 8) | mac[5];
+}
+
+void EmergencyWiFiService::broadcastMeshStatus() {
+    // Create JSON document for mesh status
+    DynamicJsonDocument doc(2048);
+    doc["type"] = "mesh_status";
+    doc["timestamp"] = millis();
+
+    // Get mesh node count
+    size_t numNodes = nodeDB->getNumMeshNodes();
+    size_t numOnline = nodeDB->getNumOnlineMeshNodes();
+
+    doc["total_nodes"] = numNodes;
+    doc["online_nodes"] = numOnline;
+
+    // Add node details
+    JsonArray nodesArray = doc.createNestedArray("nodes");
+
+    uint32_t readIndex = 0;
+    const meshtastic_NodeInfoLite *nodeInfo = nodeDB->readNextMeshNode(readIndex);
+
+    while (nodeInfo != NULL) {
+        JsonObject node = nodesArray.createNestedObject();
+
+        // Node ID
+        char id[16];
+        snprintf(id, sizeof(id), "!%08x", nodeInfo->num);
+        node["id"] = id;
+
+        // User info
+        if (nodeInfo->has_user) {
+            node["long_name"] = nodeInfo->user.long_name;
+            node["short_name"] = nodeInfo->user.short_name;
+        }
+
+        // Signal quality
+        node["snr"] = nodeInfo->snr;
+
+        // Calculate RSSI from SNR (approximation)
+        // Typical LoRa: RSSI = SNR - noise_floor
+        // Assuming noise floor around -120dBm
+        int rssi = (int)nodeInfo->snr - 120;
+        node["rssi"] = rssi;
+
+        // Last heard timestamp
+        node["last_heard"] = nodeInfo->last_heard;
+
+        // Calculate if online (heard in last 5 minutes = 300 seconds)
+        // Use sinceLastSeen from NodeDB which handles time properly
+        uint32_t secondsAgo = sinceLastSeen(nodeInfo);
+        bool isOnline = secondsAgo < 300; // 5 minutes in seconds
+        node["is_online"] = isOnline;
+        node["seconds_ago"] = secondsAgo;
+
+        // Hop limit (if available)
+        if (nodeInfo->has_device_metrics) {
+            node["battery_level"] = nodeInfo->device_metrics.battery_level;
+        }
+
+        // Get next node
+        nodeInfo = nodeDB->readNextMeshNode(readIndex);
+    }
+
+    // Serialize and broadcast
+    String json;
+    serializeJson(doc, json);
+    broadcastToClients(json.c_str());
+
+    Serial.printf("Broadcasted mesh status: %d online / %d total nodes\n", numOnline, numNodes);
 }
 
 #endif // ENABLE_WIFI_AP
