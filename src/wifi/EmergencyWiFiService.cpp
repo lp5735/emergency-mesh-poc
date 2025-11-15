@@ -125,7 +125,7 @@ void EmergencyWiFiService::setupWebServer() {
     // Root path - serve interactive web UI
     httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         Serial.println("Root path requested - serving web UI");
-        const char* html = R"(<!DOCTYPE html>
+        const char* html = R"HTML(<!DOCTYPE html>
 <html>
 <head>
     <title>Emergency Mesh</title>
@@ -367,7 +367,7 @@ void EmergencyWiFiService::setupWebServer() {
         }
     </script>
 </body>
-</html>)";
+</html>)HTML";
         request->send(200, "text/html", html);
     });
 
