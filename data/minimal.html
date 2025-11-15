@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Emergency Mesh</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#111;color:#0f0;padding:10px}
+h1{font-size:18px;margin-bottom:10px;color:#f00}
+#status{padding:8px;background:#222;border:1px solid #0f0;margin-bottom:10px;font-size:12px}
+#messages{height:300px;overflow-y:auto;background:#000;border:1px solid #0f0;padding:10px;margin-bottom:10px}
+.msg{margin:5px 0;padding:5px;border-left:3px solid #0f0}
+.msg.sent{border-color:#ff0}
+.msg.lora{border-color:#0ff}
+input{width:calc(100% - 70px);padding:8px;background:#222;color:#0f0;border:1px solid #0f0}
+button{padding:8px 15px;background:#0a0;color:#fff;border:none;cursor:pointer}
+button:hover{background:#0c0}
+.sos{background:#f00;color:#fff;width:100%;padding:12px;margin-bottom:10px;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>🚨 Emergency Mesh</h1>
+<button class="sos" onclick="sendSOS()">🆘 EMERGENCY SOS</button>
+<div id="status">Connecting...</div>
+<div id="messages"></div>
+<input id="msg" placeholder="Type message..." onkeypress="if(event.key==='Enter')send()">
+<button onclick="send()">Send</button>
+
+<script>
+let ws;
+function connect(){
+ws=new WebSocket('ws://'+location.hostname+':81');
+ws.onopen=()=>log('Connected','info');
+ws.onmessage=e=>{
+try{
+const d=JSON.parse(e.data);
+if(d.type==='message'){
+log(d.text,d.source,d.from);
+}
+}catch(err){console.error(err)}
+};
+ws.onerror=()=>log('Error','error');
+ws.onclose=()=>{log('Disconnected','error');setTimeout(connect,3000)};
+}
+
+function send(){
+const m=document.getElementById('msg');
+if(!m.value||!ws||ws.readyState!==1)return;
+ws.send(JSON.stringify({text:m.value,timestamp:Date.now()}));
+log(m.value,'sent');
+m.value='';
+}
+
+function sendSOS(){
+if(!confirm('Send EMERGENCY SOS?'))return;
+if(ws&&ws.readyState===1){
+ws.send(JSON.stringify({text:'🆘 EMERGENCY SOS',timestamp:Date.now()}));
+log('🆘 EMERGENCY SOS SENT','sent');
+}
+}
+
+function log(text,type='info',from=''){
+const d=document.getElementById('messages');
+const m=document.createElement('div');
+m.className='msg '+(type==='sent'?'sent':type==='lora'?'lora':'');
+m.innerHTML='<b>'+new Date().toLocaleTimeString()+'</b> '+(from?from+': ':'')+text;
+d.appendChild(m);
+d.scrollTop=d.scrollHeight;
+}
+
+connect();
+</script>
+</body>
+</html>

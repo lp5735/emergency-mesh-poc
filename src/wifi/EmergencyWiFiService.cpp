@@ -6,6 +6,116 @@
 #include <ArduinoJson.h>
 #include "modules/EmergencyWiFiBridge.h"
 
+// Service Worker for PWA offline capability (~400 bytes)
+static const char SERVICE_WORKER_JS[] PROGMEM = R"JS(const CACHE='v1';
+self.addEventListener('install',e=>{
+e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/'])));
+});
+self.addEventListener('fetch',e=>{
+e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)));
+});)JS";
+
+// PWA Manifest for app installation (~250 bytes)
+static const char MANIFEST_JSON[] PROGMEM = R"JSON({
+"name":"Emergency Mesh Network",
+"short_name":"EmrgMesh",
+"start_url":"/",
+"display":"standalone",
+"background_color":"#111",
+"theme_color":"#f00",
+"icons":[{"src":"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23f00'/%3E%3Ctext x='50' y='65' font-size='50' text-anchor='middle' fill='%23fff'%3E🚨%3C/text%3E%3C/svg%3E","sizes":"512x512","type":"image/svg+xml"}]
+})JSON";
+
+// PWA-enabled HTML with message persistence - MUST be file-level const for AsyncWebServer multi-client reliability
+static const char MINIMAL_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Emergency Mesh</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#f00">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#111;color:#0f0;padding:10px}
+h1{font-size:18px;margin-bottom:10px;color:#f00}
+#status{padding:8px;background:#222;border:1px solid #0f0;margin-bottom:10px;font-size:12px}
+#messages{height:300px;overflow-y:auto;background:#000;border:1px solid #0f0;padding:10px;margin-bottom:10px}
+.msg{margin:5px 0;padding:5px;border-left:3px solid #0f0}
+.msg.sent{border-color:#ff0}
+.msg.lora{border-color:#0ff}
+input{width:calc(100% - 70px);padding:8px;background:#222;color:#0f0;border:1px solid #0f0}
+button{padding:8px 15px;background:#0a0;color:#fff;border:none;cursor:pointer}
+button:hover{background:#0c0}
+.sos{background:#f00;color:#fff;width:100%;padding:12px;margin-bottom:10px;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>🚨 Emergency Mesh</h1>
+<button class="sos" onclick="sendSOS()">🆘 EMERGENCY SOS</button>
+<div id="status">Connecting...</div>
+<div id="messages"></div>
+<input id="msg" placeholder="Type message..." onkeypress="if(event.key==='Enter')send()">
+<button onclick="send()">Send</button>
+
+<script>
+let ws;
+function connect(){
+ws=new WebSocket('ws://'+location.hostname+':81');
+ws.onopen=()=>log('Connected','info');
+ws.onmessage=e=>{
+try{
+const d=JSON.parse(e.data);
+if(d.type==='message'){
+log(d.text,d.source,d.from);
+}
+}catch(err){console.error(err)}
+};
+ws.onerror=()=>log('Error','error');
+ws.onclose=()=>{log('Disconnected','error');setTimeout(connect,3000)};
+}
+
+function send(){
+const m=document.getElementById('msg');
+if(!m.value||!ws||ws.readyState!==1)return;
+ws.send(JSON.stringify({text:m.value,timestamp:Date.now()}));
+log(m.value,'sent');
+m.value='';
+}
+
+function sendSOS(){
+if(!confirm('Send EMERGENCY SOS?'))return;
+if(ws&&ws.readyState===1){
+ws.send(JSON.stringify({text:'🆘 EMERGENCY SOS',timestamp:Date.now()}));
+log('🆘 EMERGENCY SOS SENT','sent');
+}
+}
+
+function log(text,type='info',from=''){
+const d=document.getElementById('messages');
+const m=document.createElement('div');
+m.className='msg '+(type==='sent'?'sent':type==='lora'?'lora':'');
+m.innerHTML='<b>'+new Date().toLocaleTimeString()+'</b> '+(from?from+': ':'')+text;
+d.appendChild(m);
+d.scrollTop=d.scrollHeight;
+let h=JSON.parse(localStorage.getItem('msgHistory')||'[]');
+h.push({text,type,from,time:Date.now()});
+if(h.length>100)h.shift();
+localStorage.setItem('msgHistory',JSON.stringify(h));
+}
+
+window.onload=()=>{
+let h=JSON.parse(localStorage.getItem('msgHistory')||'[]');
+h.forEach(m=>log(m.text,m.type,m.from));
+connect();
+if('serviceWorker'in navigator){
+navigator.serviceWorker.register('/sw.js').then(()=>console.log('SW registered')).catch(e=>console.log('SW failed',e));
+}
+};
+</script>
+</body>
+</html>)HTML";
+
 EmergencyWiFiService wifiService;
 
 EmergencyWiFiService::EmergencyWiFiService()
@@ -122,257 +232,49 @@ void EmergencyWiFiService::setupWebServer() {
         }
     });
 
-    // Root path - serve interactive web UI
+    // Root path - serve PWA-enabled HTML
     httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        Serial.println("Root path requested - serving web UI");
-
-        // Use String to avoid stack overflow with large HTML
-        String html = R"HTML(<!DOCTYPE html>
-<html>
-<head>
-    <title>Emergency Mesh</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px; background: #1e1e1e; color: #00ff00; max-width: 600px; margin: 0 auto; }
-        h1 { color: #00ff00; border-bottom: 2px solid #00ff00; padding-bottom: 10px; }
-        #status { padding: 10px; margin: 10px 0; border-radius: 5px; font-weight: bold; }
-        #status.connected { background: #004400; color: #00ff00; }
-        #status.disconnected { background: #440000; color: #ff0000; }
-        #userInfo { padding: 10px; margin: 10px 0; background: #003300; border: 1px solid #00ff00; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
-        #currentUser { color: #00ff00; font-weight: bold; }
-        #changeUserBtn { padding: 5px 10px; background: #006600; color: #00ff00; border: 1px solid #00ff00; cursor: pointer; border-radius: 3px; font-size: 12px; }
-        #messages { border: 1px solid #00ff00; padding: 10px; height: 300px; overflow-y: scroll; margin: 10px 0; background: #000; border-radius: 5px; }
-        .message { margin: 8px 0; padding: 8px; border-radius: 5px; }
-        .message .username { font-weight: bold; margin-right: 5px; }
-        .message .timestamp { color: #666; font-size: 11px; margin-right: 5px; }
-        .message .text { display: inline; }
-        .sent { background: #332200; border-left: 3px solid #ffff00; }
-        .sent .username { color: #ffff00; }
-        .sent .text { color: #ffff00; }
-        .received { background: #002200; border-left: 3px solid #00ff00; }
-        .received .username { color: #00ff00; }
-        .received .text { color: #00ff00; }
-        .other-user { background: #001a33; border-left: 3px solid #0088ff; }
-        .other-user .username { color: #0088ff; }
-        .other-user .text { color: #00aaff; }
-        .error { color: #ff0000; background: #220000; border-left: 3px solid #ff0000; }
-        .info { color: #00aaff; background: #001122; border-left: 3px solid #00aaff; }
-        .input-group { margin: 10px 0; }
-        input { padding: 10px; width: calc(100% - 22px); background: #000; color: #00ff00; border: 1px solid #00ff00; border-radius: 5px; font-size: 16px; }
-        button { padding: 10px 20px; background: #00ff00; color: #000; border: none; cursor: pointer; margin: 5px 5px 5px 0; border-radius: 5px; font-weight: bold; }
-        button:active { background: #00aa00; }
-        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
-        .stat { background: #000; padding: 10px; border: 1px solid #00ff00; border-radius: 5px; text-align: center; }
-        .stat-value { font-size: 24px; font-weight: bold; color: #00ff00; }
-        .stat-label { font-size: 12px; color: #00aa00; }
-        #usernameModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; }
-        #usernameModal.show { display: flex; align-items: center; justify-content: center; }
-        #usernamePrompt { background: #1e1e1e; padding: 30px; border: 2px solid #00ff00; border-radius: 10px; max-width: 400px; }
-        #usernamePrompt h2 { color: #00ff00; margin-top: 0; }
-        #usernamePrompt input { width: calc(100% - 22px); margin: 10px 0; }
-    </style>
-</head>
-<body>
-    <!-- Username Modal -->
-    <div id="usernameModal">
-        <div id="usernamePrompt">
-            <h2>Welcome to Emergency Mesh</h2>
-            <p style="color: #00aa00;">Enter your name to start chatting:</p>
-            <input type="text" id="usernameInput" placeholder="Your name..." maxlength="20">
-            <button onclick="setUsername()" style="width: 100%; margin-top: 10px;">Start Chatting</button>
-        </div>
-    </div>
-
-    <h1>Emergency Mesh Network</h1>
-    <div id="status" class="disconnected">Connecting...</div>
-
-    <div id="userInfo">
-        <span>Logged in as: <span id="currentUser"></span></span>
-        <button id="changeUserBtn" onclick="changeUsername()">Change Name</button>
-    </div>
-
-    <div class="stats">
-        <div class="stat">
-            <div class="stat-value" id="sentCount">0</div>
-            <div class="stat-label">SENT</div>
-        </div>
-        <div class="stat">
-            <div class="stat-value" id="receivedCount">0</div>
-            <div class="stat-label">RECEIVED</div>
-        </div>
-    </div>
-
-    <div id="messages"></div>
-
-    <div class="input-group">
-        <input type="text" id="messageInput" placeholder="Type message and press Enter...">
-        <button onclick="sendMessage()">Send Message</button>
-    </div>
-
-    <script>
-        let ws;
-        let sentCount = 0;
-        let receivedCount = 0;
-        let username = localStorage.getItem('emergencyMeshUsername') || '';
-        const messages = document.getElementById('messages');
-        const status = document.getElementById('status');
-        const input = document.getElementById('messageInput');
-
-        function setUsername() {
-            const nameInput = document.getElementById('usernameInput');
-            const name = nameInput.value.trim();
-            if (!name) {
-                alert('Please enter a name');
-                return;
-            }
-            username = name;
-            localStorage.setItem('emergencyMeshUsername', username);
-            document.getElementById('currentUser').textContent = username;
-            document.getElementById('usernameModal').classList.remove('show');
-            connect();
-        }
-
-        function changeUsername() {
-            document.getElementById('usernameInput').value = username;
-            document.getElementById('usernameModal').classList.add('show');
-            document.getElementById('usernameInput').focus();
-        }
-
-        function log(msg, className = '', user = '', time = null) {
-            const div = document.createElement('div');
-            div.className = 'message ' + className;
-
-            const timestamp = time || new Date().toLocaleTimeString();
-            const timeSpan = document.createElement('span');
-            timeSpan.className = 'timestamp';
-            timeSpan.textContent = timestamp;
-            div.appendChild(timeSpan);
-
-            if (user) {
-                const userSpan = document.createElement('span');
-                userSpan.className = 'username';
-                userSpan.textContent = user + ':';
-                div.appendChild(userSpan);
-            }
-
-            const textSpan = document.createElement('span');
-            textSpan.className = 'text';
-            textSpan.textContent = msg;
-            div.appendChild(textSpan);
-
-            messages.appendChild(div);
-            messages.scrollTop = messages.scrollHeight;
-        }
-
-        function updateStatus(text, connected) {
-            status.textContent = text;
-            status.className = connected ? 'connected' : 'disconnected';
-        }
-
-        function updateStats() {
-            document.getElementById('sentCount').textContent = sentCount;
-            document.getElementById('receivedCount').textContent = receivedCount;
-        }
-
-        function connect() {
-            ws = new WebSocket('ws://' + window.location.hostname + ':81');
-
-            ws.onopen = () => {
-                updateStatus('Connected to Emergency Mesh', true);
-                log('WebSocket connected', 'info');
-            };
-
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'message') {
-                        receivedCount++;
-                        updateStats();
-
-                        const msgUser = data.username || 'Unknown';
-                        const isFromMe = msgUser === username;
-
-                        // Determine message class based on source and user
-                        let msgClass = 'received';
-                        if (data.source === 'wifi') {
-                            msgClass = isFromMe ? 'sent' : 'other-user';
-                            log(data.text, msgClass, msgUser);
-                        } else {
-                            // LoRa message
-                            const loraInfo = ' (LoRa: ' + data.from + ', RSSI: ' + data.rssi + ' dBm)';
-                            log(data.text + loraInfo, 'received', msgUser);
-                        }
-                    } else if (data.type === 'node_info') {
-                        log('Node ID: ' + data.nodeId, 'info');
-                    } else {
-                        log('Data: ' + event.data, 'info');
-                    }
-                } catch(e) {
-                    log('Received: ' + event.data, 'received');
-                }
-            };
-
-            ws.onerror = () => {
-                log('WebSocket error', 'error');
-                updateStatus('Connection error', false);
-            };
-
-            ws.onclose = () => {
-                updateStatus('Disconnected - reconnecting...', false);
-                log('WebSocket closed, reconnecting in 3s...', 'error');
-                setTimeout(connect, 3000);
-            };
-        }
-
-        function sendMessage() {
-            const msg = input.value.trim();
-            if (!msg) return;
-
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
-                log('Error: Not connected to WebSocket', 'error');
-                return;
-            }
-
-            // Send via WebSocket (will broadcast to all WiFi clients + LoRa mesh)
-            const msgObj = {
-                text: msg,
-                username: username,
-                timestamp: Date.now()
-            };
-            ws.send(JSON.stringify(msgObj));
-
-            sentCount++;
-            updateStats();
-            log(msg, 'sent', username);
-            input.value = '';
-        }
-
-        // Send on Enter key
-        input.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
-
-        // Username input - send on Enter
-        document.getElementById('usernameInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') setUsername();
-        });
-
-        // Auto-connect on load or show username modal
-        if (username) {
-            document.getElementById('currentUser').textContent = username;
-            connect();
-            log('Emergency Mesh Web UI loaded', 'info');
-            log('Waiting for messages...', 'info');
-        } else {
-            document.getElementById('usernameModal').classList.add('show');
-            document.getElementById('usernameInput').focus();
-        }
-    </script>
-</body>
-</html>)HTML";
-
-        request->send(200, "text/html", html);
+        Serial.printf("Root path requested from %s\n", request->client()->remoteIP().toString().c_str());
+        AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", MINIMAL_HTML);
+        response->addHeader("Connection", "close");
+        response->addHeader("Cache-Control", "no-cache");
+        request->send(response);
+        Serial.printf("Sent PWA HTML to %s\n", request->client()->remoteIP().toString().c_str());
     });
+
+    // Service Worker for PWA offline capability
+    httpServer.on("/sw.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+        Serial.println("Service worker requested");
+        AsyncWebServerResponse *response = request->beginResponse_P(200, "application/javascript", SERVICE_WORKER_JS);
+        response->addHeader("Connection", "close");
+        response->addHeader("Cache-Control", "no-cache"); // Don't cache SW, allow updates
+        request->send(response);
+    });
+
+    // PWA Manifest for app installation
+    httpServer.on("/manifest.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+        Serial.println("Manifest requested");
+        AsyncWebServerResponse *response = request->beginResponse_P(200, "application/json", MANIFEST_JSON);
+        response->addHeader("Connection", "close");
+        response->addHeader("Cache-Control", "public, max-age=86400"); // Cache for 24h
+        request->send(response);
+    });
+
+    // Also serve index.html if anyone requests it explicitly
+    httpServer.on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+        Serial.println("/index.html requested - redirecting to /");
+        request->redirect("/");
+    });
+
+    // Serve emergency.html directly
+    httpServer.on("/emergency.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+        Serial.println("/emergency.html requested - redirecting to /");
+        request->redirect("/");
+    });
+
+    // OLD EMBEDDED HTML APPROACH - DELETED (was lines 166-411)
+    // Was causing stack overflow and empty responses
+    // Replaced with LittleFS file serving like Meshtastic does
 
     // Log all other requests
     httpServer.onNotFound([](AsyncWebServerRequest *request) {
